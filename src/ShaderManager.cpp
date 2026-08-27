@@ -66,7 +66,7 @@ namespace ShaderToggler
 	}
 
 
-	void ShaderManager::startHuntingMode(const std::unordered_set<uint32_t> currentMarkedHashes)
+	void ShaderManager::startHuntingMode(const std::unordered_set<uint32_t>& currentMarkedHashes)
 	{
 		// copy the currently marked hashes (from the active group) to the set of marked hashes.
 		{
@@ -103,7 +103,7 @@ namespace ShaderToggler
 
 	void ShaderManager::setActiveHuntedShaderHandle()
 	{
-		if(_activeHuntedShaderIndex<0 || _collectedActiveShaderHashes.size()<=0 || _activeHuntedShaderIndex >= _collectedActiveShaderHashes.size())
+		if(_activeHuntedShaderIndex<0 || _collectedActiveShaderHashes.empty() || _activeHuntedShaderIndex >= _collectedActiveShaderHashes.size())
 		{
 			_activeHuntedShaderHash = 0;
 			return;
@@ -122,13 +122,13 @@ namespace ShaderToggler
 		{
 			return;
 		}
-		if(_collectedActiveShaderHashes.size()<=0)
+		if(_collectedActiveShaderHashes.empty())
 		{
 			return;
 		}
 		if(ctrlPressed)
 		{
-			if(_markedShaderHashes.size()==0 || (_markedShaderHashes.size() == 1 && _markedShaderHashes.count(_activeHuntedShaderHash)==1))
+			if(_markedShaderHashes.empty() || (_markedShaderHashes.size() == 1 && _markedShaderHashes.count(_activeHuntedShaderHash)==1))
 			{
 				// optimization: if the current active shader is part of marked shader hashes and there is
 				// just 1 marked, then we can also stop. We then don't need to do anything so we can return
@@ -185,13 +185,13 @@ namespace ShaderToggler
 		{
 			return;
 		}
-		if(_collectedActiveShaderHashes.size()<=0)
+		if(_collectedActiveShaderHashes.empty())
 		{
 			return;
 		}
 		if(ctrlPressed)
 		{
-			if(_markedShaderHashes.size() == 0 || (_markedShaderHashes.size() == 1 && _markedShaderHashes.count(_activeHuntedShaderHash) == 1))
+			if(_markedShaderHashes.empty() || (_markedShaderHashes.size() == 1 && _markedShaderHashes.count(_activeHuntedShaderHash) == 1))
 			{
 				// optimization: if the current active shader is part of marked shader hashes and there is
 				// just 1 marked, then we can also stop. We then don't need to do anything so we can return
@@ -295,6 +295,7 @@ namespace ShaderToggler
 
 	uint32_t ShaderManager::getShaderHash(uint64_t handle)
 	{
+		std::unique_lock ulock(_hashHandlesMutex);
 		if(_handleToShaderHash.count(handle)!=1)
 		{
 			return 0;

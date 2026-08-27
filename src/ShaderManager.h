@@ -59,7 +59,7 @@ namespace ShaderToggler
 		///	where the user can step through collected active shaders to mark them for assignment to the current edited group.
 		/// </summary>
 		/// <param name="currentMarkedHashes"></param>
-		void startHuntingMode(const std::unordered_set<uint32_t> currentMarkedHashes);
+		void startHuntingMode(const std::unordered_set<uint32_t>& currentMarkedHashes);
 		void stopHuntingMode();
 		/// <summary>
 		/// Moves to the next shader. If control is pressed as well, it'll step to the next marked shader (if any). If there aren't any shaders in that
