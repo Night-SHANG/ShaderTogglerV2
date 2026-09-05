@@ -1,0 +1,17 @@
+--- official-1.2.2/src/KeyData.cpp
++++ classic-cn-repeat/src/KeyData.cpp
+@@ -1,4 +1,4 @@
+-///////////////////////////////////////////////////////////////////////
++﻿///////////////////////////////////////////////////////////////////////
+ //
+ // Part of ShaderToggler, a shader toggler add on for Reshade 5+ which allows you
+ // to define groups of shaders to toggle them on/off with one key press
+@@ -151,7 +151,7 @@
+ 		if (!_altRequired && !_ctrlRequired && !_shiftRequired && (_keyCode <= 0))
+ 		{
+ 			// empty
+-			_keyAsString = "Press a key";
++			_keyAsString = "请按下按键";
+ 			return;
+ 		}
+ 		_keyAsString.clear();

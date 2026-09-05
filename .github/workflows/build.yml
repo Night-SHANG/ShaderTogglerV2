@@ -1,0 +1,130 @@
+name: Build ShaderToggler Classic CN
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Verify bundled x64 headers
+        shell: powershell
+        run: |
+          if (!(Test-Path ./source/x64-1.2.2/src/Include/reshade.hpp)) { throw "Bundled ReShade headers are missing" }
+          if (!(Test-Path ./source/x64-1.2.2/src/Include/imgui.h)) { throw "Bundled ImGui header is missing" }
+
+      - name: Build x64 Release
+        shell: powershell
+        run: msbuild ./source/x64-1.2.2/src/ShaderToggler.sln /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
+
+      - name: Collect x64
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path ./dist/x64 | Out-Null
+          $f = Get-ChildItem ./source/x64-1.2.2 -Recurse -Filter *.addon64 | Select-Object -First 1
+          if (-not $f) { throw "ShaderToggler.addon64 was not produced" }
+          Copy-Item $f.FullName ./dist/x64/ShaderToggler.addon64 -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShaderToggler-CN-x64
+          path: dist/x64/ShaderToggler.addon64
+          if-no-files-found: error
+
+  build-x86:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Fetch exact official 1.0.1 source
+        shell: powershell
+        run: git clone --depth 1 --branch 1.0.1 https://github.com/FransBouma/ShaderToggler.git ./_x86_upstream
+
+      - name: Apply x86 CN + hold-repeat patch
+        shell: powershell
+        run: python ./source/x86-1.0.1/apply_x86_1.0.1_cn_repeat.py ./_x86_upstream
+
+      - name: Verify bundled x86 headers
+        shell: powershell
+        run: |
+          if (!(Test-Path ./_x86_upstream/src/Include/reshade.hpp)) { throw "Official 1.0.1 ReShade headers are missing" }
+          if (!(Test-Path ./_x86_upstream/src/Include/imgui.h)) { throw "Official 1.0.1 ImGui header is missing" }
+
+      - name: Snapshot complete patched x86 source
+        shell: powershell
+        run: |
+          Remove-Item -Recurse -Force ./_x86_upstream/.git -ErrorAction SilentlyContinue
+          Compress-Archive -Path ./_x86_upstream/* -DestinationPath ./ShaderToggler-x86-1.0.1-CN-source.zip -Force
+
+      - name: Upload complete patched x86 source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShaderToggler-CN-x86-source
+          path: ShaderToggler-x86-1.0.1-CN-source.zip
+          if-no-files-found: error
+
+      - name: Build Win32 Release
+        shell: powershell
+        run: msbuild ./_x86_upstream/src/ShaderToggler.sln /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143
+
+      - name: Collect x86
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path ./dist/x86 | Out-Null
+          $f = Get-ChildItem ./_x86_upstream -Recurse -Filter *.addon32 | Select-Object -First 1
+          if (-not $f) { throw "ShaderToggler.addon32 was not produced" }
+          Copy-Item $f.FullName ./dist/x86/ShaderToggler.addon32 -Force
+          Copy-Item ./ShaderToggler-x86-1.0.1-CN-source.zip ./dist/x86/ShaderToggler-x86-1.0.1-CN-source.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShaderToggler-CN-x86
+          path: |
+            dist/x86/ShaderToggler.addon32
+            dist/x86/ShaderToggler-x86-1.0.1-CN-source.zip
+          if-no-files-found: error
+
+  bundle:
+    needs: [build-x64, build-x86]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ShaderToggler-CN-x64
+          path: ./bundle/x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ShaderToggler-CN-x86
+          path: ./bundle/x86
+
+      - name: Make combined package
+        shell: powershell
+        run: Compress-Archive -Path ./bundle/* -DestinationPath ./ShaderToggler-Classic-CN-Repeat.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShaderToggler-Classic-CN-Repeat
+          path: ShaderToggler-Classic-CN-Repeat.zip
+          if-no-files-found: error
+
+      - name: Publish release when pushing a tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" ./ShaderToggler-Classic-CN-Repeat.zip --title "ShaderToggler Classic CN ${{ github.ref_name }}" --generate-notes

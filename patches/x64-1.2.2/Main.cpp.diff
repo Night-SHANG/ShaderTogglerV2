@@ -1,0 +1,398 @@
+--- official-1.2.2/src/Main.cpp
++++ classic-cn-repeat/src/Main.cpp
+@@ -1,4 +1,4 @@
+-///////////////////////////////////////////////////////////////////////
++﻿///////////////////////////////////////////////////////////////////////
+ //
+ // Part of ShaderToggler, a shader toggler add on for Reshade 5+ which allows you
+ // to define groups of shaders to toggle them on/off with one key press
+@@ -41,12 +41,13 @@
+ #include "ToggleGroup.h"
+ #include <vector>
+ #include <filesystem>
++#include <chrono>
+ 
+ using namespace reshade::api;
+ using namespace ShaderToggler;
+ 
+-extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";
+-extern "C" __declspec(dllexport) const char *DESCRIPTION = "Add-on which allows you to define groups of game shaders to toggle on/off with one key press.";
++extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler 经典增强中文版";
++extern "C" __declspec(dllexport) const char *DESCRIPTION = "基于官方 1.2.2：保留经典版功能和 INI 格式，增加长按加速查找与简体中文界面。";
+ 
+ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataContainer {
+     uint64_t activePixelShaderPipeline;
+@@ -69,6 +70,73 @@
+ static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
+ static std::string g_iniFileName = "";
+ 
++
++// Classic CN Repeat: accelerated shader browsing while holding the hunt keys.
++// ReShade input is primary; Win32 key state is used as a fallback, mirroring the
++// practical approach used by ShaderTogglerAdvanced. Mark keys remain edge-triggered.
++struct HuntRepeatState
++{
++    bool previousDown = false;
++    bool holding = false;
++    std::chrono::steady_clock::time_point holdStart{};
++    std::chrono::steady_clock::time_point lastRepeat{};
++};
++
++static HuntRepeatState g_repeatNumpad1;
++static HuntRepeatState g_repeatNumpad2;
++static HuntRepeatState g_repeatNumpad4;
++static HuntRepeatState g_repeatNumpad5;
++static HuntRepeatState g_repeatNumpad7;
++static HuntRepeatState g_repeatNumpad8;
++
++static bool isHuntKeyDown(effect_runtime* runtime, const uint32_t keyCode)
++{
++    return runtime->is_key_down(keyCode) ||
++           ((GetAsyncKeyState(static_cast<int>(keyCode)) & 0x8000) != 0);
++}
++
++static int getHuntRepeatIntervalMs(
++    const std::chrono::steady_clock::time_point& holdStart,
++    const std::chrono::steady_clock::time_point& now)
++{
++    const auto heldMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - holdStart).count();
++    if(heldMs >= 2400) return 35;
++    if(heldMs >= 1400) return 70;
++    if(heldMs >= 700) return 120;
++    return 200;
++}
++
++static bool shouldAdvanceHuntKey(effect_runtime* runtime, const uint32_t keyCode, HuntRepeatState& state)
++{
++    const auto now = std::chrono::steady_clock::now();
++    const bool down = isHuntKeyDown(runtime, keyCode);
++    const bool justPressed = down && !state.previousDown;
++    state.previousDown = down;
++
++    if(!down)
++    {
++        state.holding = false;
++        return false;
++    }
++
++    if(justPressed || !state.holding)
++    {
++        state.holding = true;
++        state.holdStart = now;
++        state.lastRepeat = now;
++        return true;
++    }
++
++    const int intervalMs = getHuntRepeatIntervalMs(state.holdStart, now);
++    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - state.lastRepeat).count();
++    if(elapsedMs >= intervalMs)
++    {
++        state.lastRepeat = now;
++        return true;
++    }
++    return false;
++}
++
+ /// <summary>
+ /// Calculates a crc32 hash from the passed in shader bytecode. The hash is used to identity the shader in future runs.
+ /// </summary>
+@@ -206,7 +274,7 @@
+ {
+ 	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+ 	ImGui::SameLine();
+-	ImGui::Text(" Shader is part of this toggle group.");
++	ImGui::Text(" 当前着色器已属于此切换组。");
+ 	ImGui::PopStyleColor();
+ }
+ 
+@@ -215,8 +283,8 @@
+ {
+ 	if(toDisplay.isInHuntingMode())
+ 	{
+-		ImGui::Text("# of %s shaders active: %d. # of %s shaders in group: %d", shaderType, toDisplay.getAmountShaderHashesCollected(), shaderType, toDisplay.getMarkedShaderCount());
+-		ImGui::Text("Current selected %s shader: %d / %d.", shaderType, toDisplay.getActiveHuntedShaderIndex(), toDisplay.getAmountShaderHashesCollected());
++		ImGui::Text("当前活动%s着色器：%d；组内%s着色器：%d", shaderType, toDisplay.getAmountShaderHashesCollected(), shaderType, toDisplay.getMarkedShaderCount());
++		ImGui::Text("当前选择的%s着色器：%d / %d", shaderType, toDisplay.getActiveHuntedShaderIndex(), toDisplay.getAmountShaderHashesCollected());
+ 		if(toDisplay.isHuntedShaderMarked())
+ 		{
+ 			displayIsPartOfToggleGroup();
+@@ -226,7 +294,7 @@
+ 
+ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shaderType)
+ {
+-	ImGui::Text("# of pipelines with %s shaders: %d. # of different %s shaders gathered: %d.", shaderType, toDisplay.getPipelineCount(), shaderType, toDisplay.getShaderCount());
++	ImGui::Text("包含%s着色器的管线：%d；已收集的不同%s着色器：%d", shaderType, toDisplay.getPipelineCount(), shaderType, toDisplay.getShaderCount());
+ }
+ 
+ 
+@@ -252,24 +320,24 @@
+ 			}
+ 		}
+ 		
+-		displayShaderManagerStats(g_vertexShaderManager, "vertex");
+-		displayShaderManagerStats(g_pixelShaderManager, "pixel");
+-		displayShaderManagerStats(g_computeShaderManager, "compute");
++		displayShaderManagerStats(g_vertexShaderManager, "顶点");
++		displayShaderManagerStats(g_pixelShaderManager, "像素");
++		displayShaderManagerStats(g_computeShaderManager, "计算");
+ 
+ 		if(g_activeCollectorFrameCounter > 0)
+ 		{
+ 			const uint32_t counterValue = g_activeCollectorFrameCounter;
+-			ImGui::Text("Collecting active shaders... frames to go: %d", counterValue);
++			ImGui::Text("正在收集活动着色器……剩余帧数：%d", counterValue);
+ 		}
+ 		else
+ 		{
+ 			if(g_vertexShaderManager.isInHuntingMode() || g_pixelShaderManager.isInHuntingMode() || g_computeShaderManager.isInHuntingMode())
+ 			{
+-				ImGui::Text("Editing the shaders for group: %s", editingGroupName.c_str());
++				ImGui::Text("正在查找切换组的着色器：%s", editingGroupName.c_str());
+ 			}
+-			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
+-			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
+-			displayShaderManagerInfo(g_computeShaderManager, "compute");
++			displayShaderManagerInfo(g_vertexShaderManager, "顶点");
++			displayShaderManagerInfo(g_pixelShaderManager, "像素");
++			displayShaderManagerInfo(g_computeShaderManager, "计算");
+ 		}
+ 		ImGui::End();
+ 	}
+@@ -439,48 +507,47 @@
+ 		}
+ 	}
+ 
+-	// hardcoded hunting keys.
+-	// If Ctrl is pressed too, it'll step to the next marked shader (if any)
+-	// Numpad 1: previous pixel shader
+-	// Numpad 2: next pixel shader
+-	// Numpad 3: mark current pixel shader as part of the toggle group
+-	// Numpad 4: previous vertex shader
+-	// Numpad 5: next vertex shader
+-	// Numpad 6: mark current vertex shader as part of the toggle group
+-	// Numpad 7: previous compute shader
+-	// Numpad 8: next compute shader
+-	// Numpad 9: mark current compute shader as part of the toggle group
+-	if(runtime->is_key_pressed(VK_NUMPAD1))
++	// 固定的着色器查找按键。
++	// Ctrl + 浏览键：只在当前组已标记的着色器之间移动。
++	// 浏览键支持长按连续移动，并随着按住时间逐渐加速。
++	// Numpad 1 / 2: 上一个 / 下一个像素着色器
++	// Numpad 3: 标记 / 取消标记当前像素着色器
++	// Numpad 4 / 5: 上一个 / 下一个顶点着色器
++	// Numpad 6: 标记 / 取消标记当前顶点着色器
++	// Numpad 7 / 8: 上一个 / 下一个计算着色器
++	// Numpad 9: 标记 / 取消标记当前计算着色器
++	const bool controlDown = runtime->is_key_down(VK_CONTROL) || ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);
++	if(shouldAdvanceHuntKey(runtime, VK_NUMPAD1, g_repeatNumpad1))
+ 	{
+-		g_pixelShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
++		g_pixelShaderManager.huntPreviousShader(controlDown);
+ 	}
+-	if(runtime->is_key_pressed(VK_NUMPAD2))
++	if(shouldAdvanceHuntKey(runtime, VK_NUMPAD2, g_repeatNumpad2))
+ 	{
+-		g_pixelShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
++		g_pixelShaderManager.huntNextShader(controlDown);
+ 	}
+ 	if(runtime->is_key_pressed(VK_NUMPAD3))
+ 	{
+ 		g_pixelShaderManager.toggleMarkOnHuntedShader();
+ 	}
+-	if(runtime->is_key_pressed(VK_NUMPAD4))
++	if(shouldAdvanceHuntKey(runtime, VK_NUMPAD4, g_repeatNumpad4))
+ 	{
+-		g_vertexShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
++		g_vertexShaderManager.huntPreviousShader(controlDown);
+ 	}
+-	if(runtime->is_key_pressed(VK_NUMPAD5))
++	if(shouldAdvanceHuntKey(runtime, VK_NUMPAD5, g_repeatNumpad5))
+ 	{
+-		g_vertexShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
++		g_vertexShaderManager.huntNextShader(controlDown);
+ 	}
+ 	if(runtime->is_key_pressed(VK_NUMPAD6))
+ 	{
+ 		g_vertexShaderManager.toggleMarkOnHuntedShader();
+ 	}
+-	if(runtime->is_key_pressed(VK_NUMPAD7))
++	if(shouldAdvanceHuntKey(runtime, VK_NUMPAD7, g_repeatNumpad7))
+ 	{
+-		g_computeShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
++		g_computeShaderManager.huntPreviousShader(controlDown);
+ 	}
+-	if(runtime->is_key_pressed(VK_NUMPAD8))
++	if(shouldAdvanceHuntKey(runtime, VK_NUMPAD8, g_repeatNumpad8))
+ 	{
+-		g_computeShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
++		g_computeShaderManager.huntNextShader(controlDown);
+ 	}
+ 	if(runtime->is_key_pressed(VK_NUMPAD9))
+ 	{
+@@ -588,42 +655,42 @@
+ 		g_keyCollector.collectKeysPressed(runtime);
+ 	}
+ 
+-	if(ImGui::CollapsingHeader("General info and help"))
++	if(ImGui::CollapsingHeader("基本说明与帮助"))
+ 	{
+ 		ImGui::PushTextWrapPos();
+-		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex or pixel shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled, effectively hiding the elements in the 3D scene.");
+-		ImGui::TextUnformatted("\nThe following (hardcoded) keyboard shortcuts are used when you click a group's 'Change Shaders' button:");
+-		ImGui::TextUnformatted("* Numpad 1 and Numpad 2: previous/next pixel shader");
+-		ImGui::TextUnformatted("* Ctrl + Numpad 1 and Ctrl + Numpad 2: previous/next marked pixel shader in the group");
+-		ImGui::TextUnformatted("* Numpad 3: mark/unmark the current pixel shader as being part of the group");
+-		ImGui::TextUnformatted("* Numpad 4 and Numpad 5: previous/next vertex shader");
+-		ImGui::TextUnformatted("* Ctrl + Numpad 4 and Ctrl + Numpad 5: previous/next marked vertex shader in the group");
+-		ImGui::TextUnformatted("* Numpad 6: mark/unmark the current vertex shader as being part of the group");
+-		ImGui::TextUnformatted("* Numpad 7 and Numpad 8: previous/next compute shader");
+-		ImGui::TextUnformatted("* Ctrl + Numpad 7 and Ctrl + Numpad 8: previous/next marked compute shader in the group");
+-		ImGui::TextUnformatted("* Numpad 9: mark/unmark the current compute shader as being part of the group");
+-		ImGui::TextUnformatted("\nWhen you step through the shaders, the current shader is disabled in the 3D scene so you can see if that's the shader you were looking for.");
+-		ImGui::TextUnformatted("When you're done, make sure you click 'Save all toggle groups' to preserve the groups you defined so next time you start your game they're loaded in and you can use them right away.");
++		ImGui::TextUnformatted("Shader Toggler 可以创建一个或多个着色器切换组，并为每个组设置名称与快捷键。每个组可以包含像素、顶点或计算着色器。触发快捷键后，使用这些着色器的绘制调用会被阻止，从而隐藏对应的 HUD、特效或其他画面元素。");
++		ImGui::TextUnformatted("\n点击“查找着色器”后，可使用以下固定快捷键：");
++		ImGui::TextUnformatted("* 小键盘 1 / 2：上一个 / 下一个像素着色器（支持长按加速）");
++		ImGui::TextUnformatted("* Ctrl + 小键盘 1 / 2：上一个 / 下一个已标记的像素着色器（支持长按）");
++		ImGui::TextUnformatted("* 小键盘 3：标记 / 取消标记当前像素着色器");
++		ImGui::TextUnformatted("* 小键盘 4 / 5：上一个 / 下一个顶点着色器（支持长按加速）");
++		ImGui::TextUnformatted("* Ctrl + 小键盘 4 / 5：上一个 / 下一个已标记的顶点着色器（支持长按）");
++		ImGui::TextUnformatted("* 小键盘 6：标记 / 取消标记当前顶点着色器");
++		ImGui::TextUnformatted("* 小键盘 7 / 8：上一个 / 下一个计算着色器（支持长按加速）");
++		ImGui::TextUnformatted("* Ctrl + 小键盘 7 / 8：上一个 / 下一个已标记的计算着色器（支持长按）");
++		ImGui::TextUnformatted("* 小键盘 9：标记 / 取消标记当前计算着色器");
++		ImGui::TextUnformatted("\n浏览着色器时，当前选中的着色器会暂时被禁用，方便观察它是否对应你要定位的 HUD 或效果。按住浏览键会连续移动，并逐渐加速。");
++		ImGui::TextUnformatted("完成后请点击“保存所有切换组”，这样下次启动游戏时会自动加载这些组。配置文件格式保持与官方经典版兼容。");
+ 		ImGui::PopTextWrapPos();
+ 	}
+ 
+ 	ImGui::AlignTextToFramePadding();
+-	if(ImGui::CollapsingHeader("Shader selection parameters", ImGuiTreeNodeFlags_DefaultOpen))
++	if(ImGui::CollapsingHeader("着色器查找参数", ImGuiTreeNodeFlags_DefaultOpen))
+ 	{
+ 		ImGui::AlignTextToFramePadding();
+ 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.2f, 1.0f);
++		ImGui::SliderFloat("查找提示透明度", &g_overlayOpacity, 0.2f, 1.0f);
+ 		ImGui::AlignTextToFramePadding();
+-		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
++		ImGui::SliderInt("收集帧数", &g_startValueFramecountCollectionPhase, 10, 1000);
+ 		ImGui::SameLine();
+-		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally. Only shaders that are used in the frames collected can be marked.");
++		showHelpMarker("插件会在指定帧数内收集当前实际使用的着色器。目标着色器如果只偶尔出现，可以提高该数值。只有收集期间实际使用过的着色器才能被查找和标记。");
+ 		ImGui::PopItemWidth();
+ 	}
+ 	ImGui::Separator();
+ 
+-	if(ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
++	if(ImGui::CollapsingHeader("切换组列表", ImGuiTreeNodeFlags_DefaultOpen))
+ 	{
+-		if(ImGui::Button(" New "))
++		if(ImGui::Button(" 新建 "))
+ 		{
+ 			addDefaultGroup();
+ 		}
+@@ -641,7 +708,7 @@
+ 			ImGui::SameLine();
+ 			ImGui::Text(" %d ", group.getId());
+ 			ImGui::SameLine();
+-			if(ImGui::Button("Edit"))
++			if(ImGui::Button("编辑"))
+ 			{
+ 				group.setEditing(true);
+ 			}
+@@ -651,7 +718,7 @@
+ 			{
+ 				if(g_toggleGroupIdShaderEditing == group.getId())
+ 				{
+-					if(ImGui::Button(" Done "))
++					if(ImGui::Button(" 完成 "))
+ 					{
+ 						endShaderEditing(true, group);
+ 					}
+@@ -665,23 +732,23 @@
+ 			}
+ 			else
+ 			{
+-				if(ImGui::Button("Change shaders"))
++				if(ImGui::Button("查找着色器"))
+ 				{
+ 					ImGui::SameLine();
+ 					startShaderEditing(group);
+ 				}
+ 			}
+ 			ImGui::SameLine();
+-			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", is active" : "");
++			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", 已启用" : "");
+ 			if(group.isActiveAtStartup())
+ 			{
+ 				ImGui::SameLine();
+-				ImGui::Text(" (Active at startup)");
++				ImGui::Text(" (启动时启用)");
+ 			}
+ 			if(group.isEditing())
+ 			{
+ 				ImGui::Separator();
+-				ImGui::Text("Edit group %d", group.getId());
++				ImGui::Text("编辑切换组 %d", group.getId());
+ 
+ 				// Name of group
+ 				char tmpBuffer[150];
+@@ -689,7 +756,7 @@
+ 				strncpy_s(tmpBuffer, 150, name.c_str(), name.size());
+ 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+ 				ImGui::AlignTextToFramePadding();
+-				ImGui::Text("Name");
++				ImGui::Text("名称");
+ 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+ 				ImGui::InputText("##Name", tmpBuffer, 149);
+ 				group.setName(tmpBuffer);
+@@ -699,7 +766,7 @@
+ 				bool isKeyEditing = false;
+ 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+ 				ImGui::AlignTextToFramePadding();
+-				ImGui::Text("Key shortcut");
++				ImGui::Text("快捷键");
+ 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+ 				string textBoxContents = (g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();	// The 'press a key' is inside keycollector
+ 				string toggleKeyName = group.getToggleKeyAsString();
+@@ -712,12 +779,12 @@
+ 				{
+ 					isKeyEditing = true;
+ 					ImGui::SameLine();
+-					if(ImGui::Button("OK"))
++					if(ImGui::Button("确定"))
+ 					{
+ 						endKeyBindingEditing(true, group);
+ 					}
+ 					ImGui::SameLine();
+-					if(ImGui::Button("Cancel"))
++					if(ImGui::Button("取消"))
+ 					{
+ 						endKeyBindingEditing(false, group);
+ 					}
+@@ -728,13 +795,13 @@
+ 				ImGui::Text(" ");
+ 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+ 				bool isDefaultActive = group.isActiveAtStartup();
+-				ImGui::Checkbox("Is active at startup", &isDefaultActive);
++				ImGui::Checkbox("启动时启用", &isDefaultActive);
+ 				group.setIsActiveAtStartup(isDefaultActive);
+ 				ImGui::PopItemWidth();
+ 
+ 				if(!isKeyEditing)
+ 				{
+-					if(ImGui::Button("OK"))
++					if(ImGui::Button("确定"))
+ 					{
+ 						group.setEditing(false);
+ 						g_toggleGroupIdKeyBindingEditing = -1;
+@@ -763,7 +830,7 @@
+ 		ImGui::Separator();
+ 		if(g_toggleGroups.size() > 0)
+ 		{
+-			if(ImGui::Button("Save all Toggle Groups"))
++			if(ImGui::Button("保存所有切换组"))
+ 			{
+ 				saveShaderTogglerIniFile();
+ 			}

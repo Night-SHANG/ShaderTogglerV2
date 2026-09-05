@@ -1,0 +1,8 @@
+_deps/
+_x86_upstream/
+dist/
+bundle/
+source/x86-1.0.1/patched-source/
+.vs/
+**/Debug/
+**/Release/
