@@ -12,30 +12,42 @@ for p in (MAIN, KEY, PROJ):
     if not p.exists():
         raise SystemExit(f'缺少文件：{p}\n请对官方 ShaderToggler 1.0.1 源码运行本脚本。')
 
-def read(path): return path.read_bytes().decode('utf-8-sig')
+def read(path):
+    # Normalize CRLF/LF so the patch works against the official Windows-formatted 1.0.1 sources.
+    with path.open('r', encoding='utf-8-sig', newline=None) as f:
+        return f.read()
 def write_cpp(path, text): path.write_bytes(b'\xef\xbb\xbf' + text.encode('utf-8'))
 def backup(path):
     bak = path.with_suffix(path.suffix + '.1.0.1-original.bak')
     if not bak.exists(): shutil.copy2(path, bak)
 
 main, key, proj = read(MAIN), read(KEY), read(PROJ)
-checks = [
-    'extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";',
-    'static ShaderToggler::ShaderManager g_pixelShaderManager;',
-    'static ShaderToggler::ShaderManager g_vertexShaderManager;',
-    '#define HASH_FILE_NAME\t"ShaderToggler.ini"',
-    'groupEditing.storeCollectedHashes(g_pixelShaderManager.getMarkedShaderHashes(), g_vertexShaderManager.getMarkedShaderHashes());',
+# Identify the official 1.0.1 code by stable features rather than exact whitespace/line endings.
+required_patterns = [
+    r'NAME\s*=\s*"Shader Toggler"',
+    r'static\s+ShaderToggler::ShaderManager\s+g_pixelShaderManager\s*;',
+    r'static\s+ShaderToggler::ShaderManager\s+g_vertexShaderManager\s*;',
+    r'ShaderToggler\.ini',
 ]
-if any(s not in main for s in checks) or 'g_computeShaderManager' in main or 'VK_NUMPAD7' in main or 'Active at startup' in main:
-    raise SystemExit('源码与官方 1.0.1 结构不匹配，已停止，未修改文件。')
+if any(re.search(pat, main) is None for pat in required_patterns):
+    raise SystemExit('源码不像官方 1.0.1：缺少基础结构，已停止，未修改文件。')
+if 'g_computeShaderManager' in main or 'VK_NUMPAD7' in main or 'Active at startup' in main or 'ActiveAtStartup' in main:
+    raise SystemExit('源码不是旧版 1.0.1 功能范围（检测到后续版本功能），已停止。')
 for p in (MAIN, KEY, PROJ): backup(p)
 
 if '#include <chrono>' not in main:
-    main = main.replace('#include <vector>\n', '#include <vector>\n#include <chrono>\n', 1)
+    if '#include <vector>\n' in main:
+        main = main.replace('#include <vector>\n', '#include <vector>\n#include <chrono>\n', 1)
+    else:
+        m_inc = list(re.finditer(r'^#include[^\n]*$', main, re.M))
+        if not m_inc:
+            raise SystemExit('找不到 C++ include 插入点。')
+        pos = m_inc[-1].end()
+        main = main[:pos] + '\n#include <chrono>' + main[pos:]
 
 marker = '// Classic CN Repeat: hold-to-browse state (1.0.1 x86)'
 if marker not in main:
-    needle = 'static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;\n'
+    state_match = re.search(r'static\s+int\s+g_startValueFramecountCollectionPhase\s*=\s*FRAMECOUNT_COLLECTION_PHASE_DEFAULT\s*;', main)
     helper = '''
 
 // Classic CN Repeat: hold-to-browse state (1.0.1 x86)
@@ -101,13 +113,44 @@ static bool shouldAdvanceHuntKey(effect_runtime* runtime, const uint32_t keyCode
     return false;
 }
 '''
-    if needle not in main: raise SystemExit('找不到 1.0.1 全局状态插入点。')
-    main = main.replace(needle, needle + helper, 1)
+    if not state_match: raise SystemExit('找不到 1.0.1 全局状态插入点。')
+    pos = state_match.end()
+    main = main[:pos] + helper + main[pos:]
 
-old = '''\tif(runtime->is_key_pressed(VK_NUMPAD1))\n\t{\n\t\tg_pixelShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD2))\n\t{\n\t\tg_pixelShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD3))\n\t{\n\t\tg_pixelShaderManager.toggleMarkOnHuntedShader();\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD4))\n\t{\n\t\tg_vertexShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD5))\n\t{\n\t\tg_vertexShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD6))\n\t{\n\t\tg_vertexShaderManager.toggleMarkOnHuntedShader();\n\t}\n'''
-new = '''\tconst bool controlDown = runtime->is_key_down(VK_CONTROL) || ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);\n\tif(shouldAdvanceHuntKey(runtime, VK_NUMPAD1, g_repeatNumpad1))\n\t{\n\t\tg_pixelShaderManager.huntPreviousShader(controlDown);\n\t}\n\tif(shouldAdvanceHuntKey(runtime, VK_NUMPAD2, g_repeatNumpad2))\n\t{\n\t\tg_pixelShaderManager.huntNextShader(controlDown);\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD3))\n\t{\n\t\tg_pixelShaderManager.toggleMarkOnHuntedShader();\n\t}\n\tif(shouldAdvanceHuntKey(runtime, VK_NUMPAD4, g_repeatNumpad4))\n\t{\n\t\tg_vertexShaderManager.huntPreviousShader(controlDown);\n\t}\n\tif(shouldAdvanceHuntKey(runtime, VK_NUMPAD5, g_repeatNumpad5))\n\t{\n\t\tg_vertexShaderManager.huntNextShader(controlDown);\n\t}\n\tif(runtime->is_key_pressed(VK_NUMPAD6))\n\t{\n\t\tg_vertexShaderManager.toggleMarkOnHuntedShader();\n\t}\n'''
-if old in main: main = main.replace(old, new, 1)
-elif 'shouldAdvanceHuntKey(runtime, VK_NUMPAD1' not in main: raise SystemExit('找不到官方 1.0.1 浏览按键代码。')
+# Replace only the four browse keys. Mark/unmark keys 3 and 6 stay edge-triggered.
+if 'shouldAdvanceHuntKey(runtime, VK_NUMPAD1' not in main:
+    first_np1 = re.search(r'(?m)^(?P<indent>[ \t]*)if\s*\(\s*runtime->is_key_pressed\(VK_NUMPAD1\)\s*\)', main)
+    if not first_np1:
+        raise SystemExit('找不到官方 1.0.1 的 Numpad1 浏览代码。')
+    indent = first_np1.group('indent')
+    control_line = indent + 'const bool controlDown = runtime->is_key_down(VK_CONTROL) || ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);\n'
+    main = main[:first_np1.start()] + control_line + main[first_np1.start():]
+
+def replace_browse(vk, manager, method):
+    global main
+    pat = re.compile(
+        r'(?m)^(?P<i>[ \t]*)if\s*\(\s*runtime->is_key_pressed\(' + re.escape(vk) + r'\)\s*\)\s*\n'
+        r'(?P=i)\{\s*\n'
+        r'(?P=i)[ \t]+' + re.escape(manager) + r'\.' + re.escape(method) + r'\(\s*runtime->is_key_down\(VK_CONTROL\)\s*\)\s*;\s*\n'
+        r'(?P=i)\}',
+        re.M)
+    m = pat.search(main)
+    if not m:
+        # If already patched, accept it.
+        if f'shouldAdvanceHuntKey(runtime, {vk}' in main:
+            return
+        raise SystemExit(f'找不到官方 1.0.1 浏览按键代码：{vk}')
+    i = m.group('i')
+    repl = (f'{i}if(shouldAdvanceHuntKey(runtime, {vk}, g_repeatNumpad{vk[-1]}))\n'
+            f'{i}{{\n'
+            f'{i}\t{manager}.{method}(controlDown);\n'
+            f'{i}}}')
+    main = main[:m.start()] + repl + main[m.end():]
+
+replace_browse('VK_NUMPAD1', 'g_pixelShaderManager', 'huntPreviousShader')
+replace_browse('VK_NUMPAD2', 'g_pixelShaderManager', 'huntNextShader')
+replace_browse('VK_NUMPAD4', 'g_vertexShaderManager', 'huntPreviousShader')
+replace_browse('VK_NUMPAD5', 'g_vertexShaderManager', 'huntNextShader')
 
 repls = {
 'extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";':'extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler 经典中文版";',
@@ -161,10 +204,19 @@ if '/utf-8' not in body:
     body += '\n      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>\n    '
     proj=proj[:m.start(2)]+body+proj[m.end(2):]
 # Release Win32 output -> addon32
-pat2=re.compile(r'(<PropertyGroup Condition="\'\$\(Configuration\)\|\$\(Platform\)\'==\'Release\|Win32\'">.*?<TargetExt>)\.addon(</TargetExt>.*?</PropertyGroup>)', re.S)
-proj,n=pat2.subn(r'\1.addon32\2',proj,count=1)
-if n!=1: raise SystemExit('找不到 Release|Win32 TargetExt。')
+pat2=re.compile(r'(<PropertyGroup Condition="\'\$\(Configuration\)\|\$\(Platform\)\'==\'Release\|Win32\'">.*?<TargetExt>)(\.addon32|\.addon)(</TargetExt>.*?</PropertyGroup>)', re.S)
+m2=pat2.search(proj)
+if not m2:
+    raise SystemExit('找不到 Release|Win32 TargetExt。')
+if m2.group(2) != '.addon32':
+    proj = proj[:m2.start(2)] + '.addon32' + proj[m2.end(2):]
 
-if 'g_computeShaderManager' in main or 'ActiveAtStartup' in main: raise SystemExit('安全检查失败：意外引入后续版功能。')
+if 'g_computeShaderManager' in main or 'ActiveAtStartup' in main or 'VK_NUMPAD7' in main:
+    raise SystemExit('安全检查失败：意外引入后续版功能。')
+for vk in ('VK_NUMPAD1','VK_NUMPAD2','VK_NUMPAD4','VK_NUMPAD5'):
+    if f'shouldAdvanceHuntKey(runtime, {vk}' not in main:
+        raise SystemExit(f'安全检查失败：{vk} 长按逻辑未写入。')
+if 'runtime->is_key_pressed(VK_NUMPAD3)' not in main or 'runtime->is_key_pressed(VK_NUMPAD6)' not in main:
+    raise SystemExit('安全检查失败：标记键 3/6 被意外改变。')
 write_cpp(MAIN, main); write_cpp(KEY, key); PROJ.write_text(proj, encoding='utf-8-sig')
 print('完成：1.0.1 x86 中文 + 长按加速；INI 序列化源码未修改。')
