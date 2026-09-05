@@ -82,7 +82,7 @@ jobs:
 
       - name: Build Win32 Release
         shell: powershell
-        run: msbuild ./_x86_upstream/src/ShaderToggler.sln /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143
+        run: msbuild ./_x86_upstream/src/ShaderToggler.vcxproj /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143
 
       - name: Collect x86
         shell: powershell
