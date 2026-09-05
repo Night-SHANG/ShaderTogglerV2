@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from pathlib import Path
 import re, shutil, sys
@@ -219,4 +219,4 @@ for vk in ('VK_NUMPAD1','VK_NUMPAD2','VK_NUMPAD4','VK_NUMPAD5'):
 if 'runtime->is_key_pressed(VK_NUMPAD3)' not in main or 'runtime->is_key_pressed(VK_NUMPAD6)' not in main:
     raise SystemExit('安全检查失败：标记键 3/6 被意外改变。')
 write_cpp(MAIN, main); write_cpp(KEY, key); PROJ.write_text(proj, encoding='utf-8-sig')
-print('完成：1.0.1 x86 中文 + 长按加速；INI 序列化源码未修改。')
+print('Done: ShaderToggler 1.0.1 x86 CN + hold-repeat patch applied; INI serialization unchanged.')

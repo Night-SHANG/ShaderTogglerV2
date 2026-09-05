@@ -56,6 +56,9 @@ jobs:
 
       - name: Apply x86 CN + hold-repeat patch
         shell: powershell
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
         run: python ./source/x86-1.0.1/apply_x86_1.0.1_cn_repeat.py ./_x86_upstream
 
       - name: Verify bundled x86 headers
