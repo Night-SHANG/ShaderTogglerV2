@@ -130,4 +130,23 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" ./ShaderToggler-Classic-CN-Repeat.zip --title "ShaderToggler Classic CN ${{ github.ref_name }}" --generate-notes
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assets = @(
+            "./bundle/x64/ShaderToggler.addon64",
+            "./bundle/x86/ShaderToggler.addon32",
+            "./bundle/x86/ShaderToggler-x86-1.0.1-CN-source.zip",
+            "./ShaderToggler-Classic-CN-Repeat.zip"
+          )
+
+          foreach ($asset in $assets) {
+            if (!(Test-Path $asset)) { throw "Release asset missing: $asset" }
+          }
+
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $assets --clobber
+          }
+          else {
+            gh release create $tag $assets --title "ShaderToggler Classic CN $tag" --generate-notes
+          }
